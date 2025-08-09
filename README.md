@@ -14,6 +14,9 @@ A flexible, GUI-driven accessories framework for Paper/Spigot servers. Define an
 - Persistent storage per-player via YAML or SQLite (selectable in config).
 - Elytra auto-equip: when an Elytra is equipped in a Curio slot, it is auto-equipped to the armor chest slot and your original chestplate stats are mirrored so players keep their armor/toughness bonuses.
 - Optional integration detection (MMOItems, Crucible, Nexo).
+- If MMOItems or Crucible is installed, Curio items that carry vanilla AttributeModifiers will have those attributes applied to players while equipped (and removed cleanly when unequipped).
+- Internal direct integrations: when MMOItems/Crucible are detected, PwingCurios invokes built-in hook points to apply/clear external stats alongside your Curios (safe no-ops if APIs are unavailable).
+- Direct MMOItems/MythicLib stat support (soft): when MythicLib/MMOItems are present, Curio items’ MMO stats are aggregated and best‑effort applied to players via MythicLib (Critical Chance, Mana/Max Mana/Mana Regen, Skill Damage, Damage Types, Defense/Toughness/Health/Health Regen). All calls are reflective and fail-safe.
 
 ## Installation
 1. Place the built jar into your `plugins/` folder.
@@ -90,6 +93,13 @@ Notes:
 - YAML (default): stores to `plugins/PwingCurios/data.yml`.
 - SQLite: set `storage.type` to `SQLITE` and configure `storage.sqlite.file`.
 
+## Stat stacking semantics & additivity
+- MMOItems/MythicLib stats: PwingCurios aggregates supported stats across all equipped Curios and applies the aggregated total to the player via MythicLib using a single source key "PwingCurios". On each refresh we first remove the previous modifiers from that source, then re-apply the new totals. This means:
+  - Multiple Curios stack additively with each other.
+  - Refreshing does not double-count because we clear the previous source first.
+  - Removing or changing a Curio recomputes totals and reapplies cleanly.
+- Vanilla AttributeModifiers: If MMOItems/Crucible are installed and Curio items carry vanilla AttributeModifiers in their ItemMeta, we mirror those onto the player as transient modifiers. We keep each modifier's original operation (e.g., ADD_NUMBER, ADD_SCALAR, MULTIPLY), so their math behaves the same as on the item. We track and remove them cleanly when Curios change or on quit.
+
 ## Elytra Auto-Equip
 - Putting an Elytra into any Curio slot that accepts it auto-equips it to the Armor Chest slot.
 - If the player had a chestplate, its attribute modifiers are mirrored as transient player modifiers so the player keeps stats while flying.
@@ -116,6 +126,8 @@ Interface summary:
 Events:
 - `CurioEquipEvent` (cancellable): player, slotId, item to equip.
 - `CurioUnequipEvent` (cancellable): player, slotId, item being removed.
+- `CurioExternalStatsClearEvent` (cancellable): fire before re-apply or on player quit to let integrations clear any external stats.
+- `CurioExternalStatsApplyEvent` (cancellable): fire after built-in effects so integrations (MMOItems/Crucible) can apply their own stats like Critical Chance, Mana, Skill Damage based on equipped Curios.
 
 Example listener:
 ```java

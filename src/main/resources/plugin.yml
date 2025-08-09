@@ -4,6 +4,7 @@ main: site.pwing.pwingcurios.Pwingcurios
 api-version: '1.21'
 authors: [ finder1793 ]
 description: Framework for equippable accessories via GUI with optional hooks (MMOItems, Crucible, Nexo)
+softdepend: [ MythicLib, MMOItems, Crucible ]
 commands:
   curios:
     description: Open the Curios GUI or get a test accessory

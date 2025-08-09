@@ -13,11 +13,19 @@ repositories {
         name = "papermc-repo"
         url = "https://repo.papermc.io/repository/maven-public/"
     }
+    maven {
+        name = "phoenix"
+        url = "https://nexus.phoenixdevt.fr/repository/maven-public/"
+    }
 }
 
 dependencies {
     compileOnly("io.papermc.paper:paper-api:1.21.8-R0.1-SNAPSHOT")
     implementation("org.xerial:sqlite-jdbc:3.46.0.0")
+
+    // Optional hooks (compileOnly): MythicLib + MMOItems from PhoenixDevelopment repo
+    compileOnly("io.lumine:MythicLib-dist:1.6.2-SNAPSHOT")
+    compileOnly("net.Indyuce:MMOItems-API:6.9.5-SNAPSHOT")
 }
 
 tasks {

@@ -25,5 +25,11 @@ public class PlayerDataListener implements Listener {
     @EventHandler
     public void onQuit(PlayerQuitEvent event) {
         accessoryManager.savePlayer(event.getPlayer().getUniqueId());
+        // Notify external integrations to clear their stats for this player
+        try {
+            site.pwing.pwingcurios.api.event.CurioExternalStatsClearEvent clearEvt = new site.pwing.pwingcurios.api.event.CurioExternalStatsClearEvent(event.getPlayer());
+            org.bukkit.Bukkit.getPluginManager().callEvent(clearEvt);
+        } catch (Throwable ignored) {}
+        accessoryManager.cleanupPlayer(event.getPlayer());
     }
 }

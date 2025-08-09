@@ -33,6 +33,8 @@ public class AccessoryManager {
     // Elytra support: preserve chestplate and mirrored attribute modifier UUIDs
     private final Map<UUID, ItemStack> preservedChestplate = new HashMap<>();
     private final Map<UUID, List<UUID>> mirroredModifierIds = new HashMap<>();
+    // Curio attribute support (MMOItems/Crucible): track transient modifiers applied from Curio items
+    private final Map<UUID, List<UUID>> curioModifierIds = new HashMap<>();
 
     public AccessoryManager(Pwingcurios plugin, site.pwing.pwingcurios.storage.PlayerDataStorage storage) {
         this.plugin = plugin;
@@ -220,6 +222,51 @@ public class AccessoryManager {
         mirroredModifierIds.put(player.getUniqueId(), ids);
     }
 
+    private void clearCurioAttributeModifiers(Player player) {
+        List<UUID> ids = curioModifierIds.remove(player.getUniqueId());
+        if (ids == null) return;
+        for (Attribute attr : Attribute.values()) {
+            AttributeInstance inst = player.getAttribute(attr);
+            if (inst == null) continue;
+            for (UUID id : new ArrayList<>(ids)) {
+                try { inst.removeModifier(id); } catch (Exception ignored) {}
+            }
+        }
+    }
+
+    private void applyCurioAttributesFromEquipped(Player player) {
+        clearCurioAttributeModifiers(player);
+        Map<String, ItemStack> map = getEquipped(player);
+        if (map == null || map.isEmpty()) return;
+        // Only apply if MMOItems or Crucible is detected
+        boolean enabled = false;
+        try {
+            site.pwing.pwingcurios.integration.IntegrationManager im = plugin.getIntegrationManager();
+            if (im != null && (im.isHookActive("MMOItems") || im.isHookActive("Crucible"))) {
+                enabled = true;
+            }
+        } catch (Throwable ignored) {}
+        if (!enabled) return;
+        List<UUID> applied = new ArrayList<>();
+        for (ItemStack item : map.values()) {
+            if (item == null) continue;
+            ItemMeta meta = item.getItemMeta();
+            if (meta == null) continue;
+            try {
+                if (meta.getAttributeModifiers() != null) {
+                    meta.getAttributeModifiers().forEach((attribute, modifier) -> {
+                        AttributeInstance inst = player.getAttribute(attribute);
+                        if (inst == null) return;
+                        AttributeModifier mirror = new AttributeModifier(UUID.randomUUID(), "curios_attr", modifier.getAmount(), modifier.getOperation());
+                        inst.addModifier(mirror);
+                        applied.add(mirror.getUniqueId());
+                    });
+                }
+            } catch (Throwable ignored) {}
+        }
+        if (!applied.isEmpty()) curioModifierIds.put(player.getUniqueId(), applied);
+    }
+
     public boolean equip(Player player, ItemStack item, String slotId) {
         SlotDefinition def = slots.stream().filter(s -> s.getId().equals(slotId)).findFirst().orElse(null);
         if (def == null) return false;
@@ -275,16 +322,44 @@ public class AccessoryManager {
     }
 
     public void applyEffects(Player player) {
+        // Signal external integrations to clear previously applied stats first
+        try {
+            site.pwing.pwingcurios.api.event.CurioExternalStatsClearEvent clearEvt = new site.pwing.pwingcurios.api.event.CurioExternalStatsClearEvent(player);
+            org.bukkit.Bukkit.getPluginManager().callEvent(clearEvt);
+            if (clearEvt.isCancelled()) {
+                // If cancelled, we still proceed with our internal effects, but integrations may choose to keep their stats.
+            }
+        } catch (Throwable ignored) {}
+
+        // Built-in example effect management
         player.removePotionEffect(PotionEffectType.SPEED);
         Map<String, ItemStack> map = getEquipped(player);
-        if (map == null) return;
+        if (map == null) map = java.util.Collections.emptyMap();
         boolean hasSwift = map.values().stream().filter(Objects::nonNull).anyMatch(i -> {
             ItemMeta meta = i.getItemMeta();
-            return meta != null && meta.hasDisplayName() && meta.getDisplayName().toLowerCase(Locale.ROOT).contains("swift");
+            return meta != null && meta.hasDisplayName() && meta.getDisplayName().toLowerCase(java.util.Locale.ROOT).contains("swift");
         });
         if (hasSwift) {
             player.addPotionEffect(new PotionEffect(PotionEffectType.SPEED, 20 * 60 * 60, 0, true, false, true));
         }
+
+        // Apply vanilla AttributeModifiers from Curio items (MMOItems/Crucible compatible embeddings)
+        applyCurioAttributesFromEquipped(player);
+
+        // Let external plugins (MMOItems, Crucible, etc.) apply their own stat systems based on equipped items
+        try {
+            site.pwing.pwingcurios.api.event.CurioExternalStatsApplyEvent applyEvt = new site.pwing.pwingcurios.api.event.CurioExternalStatsApplyEvent(player, map);
+            org.bukkit.Bukkit.getPluginManager().callEvent(applyEvt);
+        } catch (Throwable ignored) {}
+
+        // Finally, invoke our internal direct integrations if their plugins are present
+        try {
+            site.pwing.pwingcurios.integration.IntegrationManager im = plugin.getIntegrationManager();
+            if (im != null) {
+                im.clearDirect(player);
+                im.applyDirect(player, map);
+            }
+        } catch (Throwable ignored) {}
     }
 
     public ItemStack createTestAccessorySwift() {
@@ -346,6 +421,11 @@ public class AccessoryManager {
         } catch (Exception e) {
             plugin.getLogger().warning("Failed to save all players: " + e.getMessage());
         }
+    }
+
+    public void cleanupPlayer(Player player) {
+        clearCurioAttributeModifiers(player);
+        clearMirroredModifiers(player);
     }
 
     public void ensureElytraState(Player player) {
