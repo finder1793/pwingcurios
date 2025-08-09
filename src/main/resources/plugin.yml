@@ -1,0 +1,15 @@
+name: PwingCurios
+version: '${version}'
+main: site.pwing.pwingcurios.Pwingcurios
+api-version: '1.21'
+authors: [ finder1793 ]
+description: Framework for equippable accessories via GUI with optional hooks (MMOItems, Crucible, Nexo)
+commands:
+  curios:
+    description: Open the Curios GUI or get a test accessory
+    usage: /curios [open|give]
+    permission: pwingcurios.use
+permissions:
+  pwingcurios.use:
+    description: Allows use of /curios
+    default: true

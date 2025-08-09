@@ -1,0 +1,41 @@
+# Gradle
+.gradle/
+build/
+# If you create custom build dirs, add them here too
+
+# Run-Paper plugin runtime directory (created by xyz.jpenilla.run-paper)
+run/
+
+# IntelliJ IDEA / JetBrains
+.idea/
+*.iml
+out/
+
+# Eclipse (in case someone imports it there)
+.project
+.classpath
+.settings/
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs and temp
+logs/
+*.log
+*.tmp
+*.swp
+
+# Local environment files
+.env
+
+# Ignore user-specific files anywhere
+*.ipr
+*.iws
+
+# Maven target (if someone uses Maven alongside Gradle)
+target/
+
+# Node-related (rare, but in case of web assets)
+node_modules/

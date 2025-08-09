@@ -1,0 +1,57 @@
+storage:
+  type: YAML # YAML or SQLITE
+  sqlite:
+    file: data.db
+
+# All Curios related settings are grouped under this root for clarity
+curios:
+  gui:
+    title: "Curios"
+    size: 27 # Must be a multiple of 9 (9, 18, 27, 36, 45, 54)
+    background:
+      material: GRAY_STAINED_GLASS_PANE
+      name: " "
+    placeholder:
+      material: LIGHT_GRAY_STAINED_GLASS_PANE
+      name: "§7Empty Slot"
+      # Optional: global custom model data for placeholders when a slot doesn't specify its own
+      custom-model-data: -1
+  # Define any number of slots. Each slot has:
+  # - id: unique string id for storage
+  # - index: GUI index (0-based)
+  # - name: display label (informational)
+  # - keywords: list of lore keywords to allow in this slot (case-insensitive, matches anywhere in a lore line)
+  # - placeholder: optional per-slot placeholder overrides (material/name/custom-model-data)
+  slots:
+    - id: necklace_1
+      index: 10
+      name: "Necklace"
+      keywords: ["necklace"]
+      placeholder:
+        material: LIGHT_BLUE_STAINED_GLASS_PANE
+        name: "§bEmpty Necklace"
+        custom-model-data: 1001
+    - id: ring_1
+      index: 12
+      name: "Ring"
+      keywords: ["ring"]
+      placeholder:
+        material: YELLOW_STAINED_GLASS_PANE
+        name: "§eEmpty Ring"
+    - id: charm_1
+      index: 14
+      name: "Charm"
+      keywords: ["charm"]
+    - id: trinket_1
+      index: 16
+      name: "Trinket"
+      keywords: ["trinket"]
+    - id: elytra_1
+      index: 22
+      name: "Elytra"
+      materials: ["ELYTRA"]
+      placeholder:
+        material: LIME_STAINED_GLASS_PANE
+        name: "§aEmpty Elytra"
+
+# Legacy keys (gui.* and curio-slots) are still supported as fallback for compatibility.
