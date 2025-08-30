@@ -15,6 +15,7 @@ import site.pwing.pwingcurios.Pwingcurios;
 
 import java.util.*;
 import java.util.stream.Collectors;
+import java.lang.reflect.Method;
 
 public class AccessoryManager {
     private final Pwingcurios plugin;
@@ -33,8 +34,10 @@ public class AccessoryManager {
     // Elytra support: preserve chestplate and mirrored attribute modifier UUIDs
     private final Map<UUID, ItemStack> preservedChestplate = new HashMap<>();
     private final Map<UUID, List<UUID>> mirroredModifierIds = new HashMap<>();
+    private final Map<UUID, List<NamespacedKey>> mirroredModifierKeys = new HashMap<>();
     // Curio attribute support (MMOItems/Crucible): track transient modifiers applied from Curio items
     private final Map<UUID, List<UUID>> curioModifierIds = new HashMap<>();
+    private final Map<UUID, List<NamespacedKey>> curioModifierKeys = new HashMap<>();
 
     public AccessoryManager(Pwingcurios plugin, site.pwing.pwingcurios.storage.PlayerDataStorage storage) {
         this.plugin = plugin;
@@ -44,8 +47,106 @@ public class AccessoryManager {
         this.indexToSlotId = this.slots.stream().collect(Collectors.toMap(SlotDefinition::getIndex, SlotDefinition::getId));
     }
 
+    private static class ModRef {
+        final AttributeModifier modifier;
+        final UUID uuid;
+        final NamespacedKey key;
+        ModRef(AttributeModifier modifier, UUID uuid, NamespacedKey key) {
+            this.modifier = modifier;
+            this.uuid = uuid;
+            this.key = key;
+        }
+    }
+
+    private ModRef createModifierCompat(String baseKey, double amount, AttributeModifier.Operation op) {
+        // Prefer modern API: AttributeModifier(NamespacedKey, double, Operation)
+        try {
+            NamespacedKey key = new NamespacedKey(plugin, baseKey + "-" + UUID.randomUUID());
+            try {
+                // Try direct constructor (modern API available in 1.21+)
+                AttributeModifier mod = new AttributeModifier(key, amount, op);
+                return new ModRef(mod, null, key);
+            } catch (NoSuchMethodError err) {
+                // Fallthrough to reflection in case of shading peculiarities
+            }
+        } catch (Throwable ignored) {
+            // In case NamespacedKey path fails (very old server), fall back below
+        }
+        // Legacy fallback: UUID-based constructor via reflection to avoid deprecation warnings
+        UUID id = UUID.randomUUID();
+        try {
+            java.lang.reflect.Constructor<AttributeModifier> ctor = AttributeModifier.class.getConstructor(UUID.class, String.class, double.class, AttributeModifier.Operation.class);
+            AttributeModifier mod = ctor.newInstance(id, baseKey, amount, op);
+            return new ModRef(mod, id, null);
+        } catch (Throwable e) {
+            // Could not construct legacy modifier; return empty ref to skip safely
+            return new ModRef(null, null, null);
+        }
+    }
+
+    private Collection<AttributeInstance> getAllAttributeInstances(Player player) {
+        // Prefer modern API: player.getAttributes()
+        try {
+            Method m = player.getClass().getMethod("getAttributes");
+            Object res = m.invoke(player);
+            if (res instanceof Collection) {
+                @SuppressWarnings("unchecked")
+                Collection<AttributeInstance> col = (Collection<AttributeInstance>) res;
+                return col;
+            }
+        } catch (Throwable ignored) {}
+        // Fallback: iterate over known attributes without calling deprecated Attribute.values() directly
+        List<AttributeInstance> list = new ArrayList<>();
+        try {
+            // Use reflection to avoid compile-time deprecation warnings
+            Method values = Attribute.class.getDeclaredMethod("values");
+            Object arr = values.invoke(null);
+            if (arr instanceof Object[]) {
+                for (Object o : (Object[]) arr) {
+                    if (o instanceof Attribute) {
+                        AttributeInstance inst = player.getAttribute((Attribute) o);
+                        if (inst != null) list.add(inst);
+                    }
+                }
+            }
+        } catch (Throwable ignored) {}
+        return list;
+    }
+
+    private boolean removeByKey(AttributeInstance inst, NamespacedKey key) {
+        if (key == null) return false;
+        try {
+            // Modern API
+            Method m = inst.getClass().getMethod("removeModifier", NamespacedKey.class);
+            m.invoke(inst, key);
+            return true;
+        } catch (Throwable ignored) {}
+        return false;
+    }
+
+    private boolean removeByUUID(AttributeInstance inst, UUID id) {
+        if (id == null) return false;
+        try {
+            // Legacy API via reflection (avoid deprecation warning)
+            Method m = inst.getClass().getMethod("removeModifier", UUID.class);
+            m.invoke(inst, id);
+            return true;
+        } catch (Throwable ignored) {}
+        return false;
+    }
+
     public List<SlotDefinition> getSlots() {
         return slots;
+    }
+
+    /**
+     * Check if the given item is allowed in the specified slot (by id), without mutating state.
+     */
+    public boolean isAllowedInSlot(ItemStack item, String slotId) {
+        if (item == null) return false;
+        SlotDefinition def = slots.stream().filter(s -> s.getId().equals(slotId)).findFirst().orElse(null);
+        if (def == null) return false;
+        return isItemAllowedInSlot(item, def);
     }
 
     public boolean isAccessory(ItemStack item) {
@@ -194,14 +295,14 @@ public class AccessoryManager {
     }
 
     private void clearMirroredModifiers(Player player) {
-        List<UUID> ids = mirroredModifierIds.remove(player.getUniqueId());
-        if (ids == null) return;
-        for (Attribute attr : Attribute.values()) {
-            AttributeInstance inst = player.getAttribute(attr);
+        UUID pu = player.getUniqueId();
+        List<UUID> ids = mirroredModifierIds.remove(pu);
+        List<NamespacedKey> keys = mirroredModifierKeys.remove(pu);
+        if ((ids == null || ids.isEmpty()) && (keys == null || keys.isEmpty())) return;
+        for (AttributeInstance inst : getAllAttributeInstances(player)) {
             if (inst == null) continue;
-            for (UUID id : new ArrayList<>(ids)) {
-                try { inst.removeModifier(id); } catch (Exception ignored) {}
-            }
+            if (keys != null) for (NamespacedKey key : new ArrayList<>(keys)) removeByKey(inst, key);
+            if (ids != null) for (UUID id : new ArrayList<>(ids)) removeByUUID(inst, id);
         }
     }
 
@@ -212,25 +313,28 @@ public class AccessoryManager {
         if (meta == null) return;
         if (meta.getAttributeModifiers(EquipmentSlot.CHEST) == null) return;
         List<UUID> ids = new ArrayList<>();
+        List<NamespacedKey> keys = new ArrayList<>();
         meta.getAttributeModifiers(EquipmentSlot.CHEST).forEach((attribute, modifier) -> {
             AttributeInstance inst = player.getAttribute(attribute);
             if (inst == null) return;
-            AttributeModifier mirror = new AttributeModifier(UUID.randomUUID(), "curios_mirror", modifier.getAmount(), modifier.getOperation());
-            inst.addModifier(mirror);
-            ids.add(mirror.getUniqueId());
+            ModRef mr = createModifierCompat("curios_mirror", modifier.getAmount(), modifier.getOperation());
+            inst.addModifier(mr.modifier);
+            if (mr.key != null) keys.add(mr.key);
+            if (mr.uuid != null) ids.add(mr.uuid);
         });
-        mirroredModifierIds.put(player.getUniqueId(), ids);
+        if (!ids.isEmpty()) mirroredModifierIds.put(player.getUniqueId(), ids);
+        if (!keys.isEmpty()) mirroredModifierKeys.put(player.getUniqueId(), keys);
     }
 
     private void clearCurioAttributeModifiers(Player player) {
-        List<UUID> ids = curioModifierIds.remove(player.getUniqueId());
-        if (ids == null) return;
-        for (Attribute attr : Attribute.values()) {
-            AttributeInstance inst = player.getAttribute(attr);
+        UUID pu = player.getUniqueId();
+        List<UUID> ids = curioModifierIds.remove(pu);
+        List<NamespacedKey> keys = curioModifierKeys.remove(pu);
+        if ((ids == null || ids.isEmpty()) && (keys == null || keys.isEmpty())) return;
+        for (AttributeInstance inst : getAllAttributeInstances(player)) {
             if (inst == null) continue;
-            for (UUID id : new ArrayList<>(ids)) {
-                try { inst.removeModifier(id); } catch (Exception ignored) {}
-            }
+            if (keys != null) for (NamespacedKey key : new ArrayList<>(keys)) removeByKey(inst, key);
+            if (ids != null) for (UUID id : new ArrayList<>(ids)) removeByUUID(inst, id);
         }
     }
 
@@ -247,7 +351,8 @@ public class AccessoryManager {
             }
         } catch (Throwable ignored) {}
         if (!enabled) return;
-        List<UUID> applied = new ArrayList<>();
+        List<UUID> appliedIds = new ArrayList<>();
+        List<NamespacedKey> appliedKeys = new ArrayList<>();
         for (ItemStack item : map.values()) {
             if (item == null) continue;
             ItemMeta meta = item.getItemMeta();
@@ -257,14 +362,17 @@ public class AccessoryManager {
                     meta.getAttributeModifiers().forEach((attribute, modifier) -> {
                         AttributeInstance inst = player.getAttribute(attribute);
                         if (inst == null) return;
-                        AttributeModifier mirror = new AttributeModifier(UUID.randomUUID(), "curios_attr", modifier.getAmount(), modifier.getOperation());
-                        inst.addModifier(mirror);
-                        applied.add(mirror.getUniqueId());
+                        ModRef mr = createModifierCompat("curios_attr", modifier.getAmount(), modifier.getOperation());
+                        if (mr.modifier == null) return;
+                        inst.addModifier(mr.modifier);
+                        if (mr.key != null) appliedKeys.add(mr.key);
+                        if (mr.uuid != null) appliedIds.add(mr.uuid);
                     });
                 }
             } catch (Throwable ignored) {}
         }
-        if (!applied.isEmpty()) curioModifierIds.put(player.getUniqueId(), applied);
+        if (!appliedIds.isEmpty()) curioModifierIds.put(player.getUniqueId(), appliedIds);
+        if (!appliedKeys.isEmpty()) curioModifierKeys.put(player.getUniqueId(), appliedKeys);
     }
 
     public boolean equip(Player player, ItemStack item, String slotId) {

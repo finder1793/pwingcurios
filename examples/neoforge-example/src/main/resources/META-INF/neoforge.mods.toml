@@ -1,0 +1,16 @@
+modLoader="javafml"
+loaderVersion="[20,)"
+license="MIT"
+
+[[mods]]
+modId="pwingcurios_example_neoforge"
+version="0.1.0"
+displayName="PwingCurios NeoForge Example"
+credits="Example client mod for PwingCurios plugin messaging"
+
+[[dependencies.pwingcurios_example_neoforge]]
+modId="neoforge"
+mandatory=true
+versionRange="[20,)"
+ordering="NONE"
+side="CLIENT"

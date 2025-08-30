@@ -1,0 +1,16 @@
+modLoader="javafml"
+loaderVersion="[47,)"
+license="MIT"
+
+[[mods]]
+modId="pwingcurios_example"
+version="0.1.0"
+displayName="PwingCurios Forge Example"
+credits="Example client mod for PwingCurios plugin messaging"
+
+[[dependencies.pwingcurios_example]]
+modId="forge"
+mandatory=true
+versionRange="[47,)"
+ordering="NONE"
+side="CLIENT"

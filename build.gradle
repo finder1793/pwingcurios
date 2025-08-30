@@ -1,7 +1,7 @@
 plugins {
     id 'java'
     id("xyz.jpenilla.run-paper") version "2.3.1"
-    id 'com.github.johnrengelman.shadow' version '8.1.1'
+    id 'com.gradleup.shadow' version '8.3.8'
 }
 
 group = 'site.pwing'
@@ -42,6 +42,36 @@ tasks {
     build {
         dependsOn shadowJar
     }
+}
+
+// Unified example client JAR that works on both Forge and NeoForge by merging
+// the two example subproject jars into one. Each loader will pick its own
+// metadata (mods.toml vs neoforge.mods.toml) and ignore the other. The JVM only
+// loads classes on demand, so unused loader-specific classes being present is fine.
+import org.gradle.api.file.DuplicatesStrategy
+
+tasks.register('unifiedClientExampleJar', Jar) {
+    group = 'build'
+    description = 'Creates a single jar that contains both the Forge and NeoForge example mods.'
+    // Ensure example jars are built first
+    dependsOn(':examples:forge-example:jar', ':examples:neoforge-example:jar')
+
+    // Pull in the built jars from the subprojects
+    def forgeJarProvider = project(':examples:forge-example').tasks.named('jar')
+    def neoJarProvider = project(':examples:neoforge-example').tasks.named('jar')
+
+    // Merge their contents
+    from({ zipTree(forgeJarProvider.get().archiveFile.get().asFile) })
+    from({ zipTree(neoJarProvider.get().archiveFile.get().asFile) })
+
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    archiveBaseName.set('pwingcurios-client-unified')
+    destinationDirectory.set(layout.buildDirectory.dir('libs'))
+}
+
+// Make the root build also produce the unified client jar
+tasks.named('build') {
+    dependsOn(tasks.named('unifiedClientExampleJar'))
 }
 
 def targetJavaVersion = 21
